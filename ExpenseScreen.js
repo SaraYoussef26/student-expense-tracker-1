@@ -19,64 +19,41 @@ export default function ExpenseScreen() {
   const [category, setCategory] = useState('');
   const [note, setNote] = useState('');
   const [filter, setFilter] = useState('All'); 
-  const [filterLabel, setFilterLabel] = useState('All');
-  const [total, setTotal] = useState(0);
-  const [totalsByCategory, setTotalsByCategory] = useState({});
+  const [editingExpense, setEditingExpense] = useState(null);
 
   const loadExpenses = async () => {
     const rows = await db.getAllAsync('SELECT * FROM expenses ORDER BY id DESC;');
-    applyFilter(rows, filter);
+    setExpenses(rows);
   };
 
-  const applyFilter = (allExpenses, selectedFilter) => {
-    let filteredList = allExpenses;
-    const today = new Date();
+  const filteredExpenses = expenses.filter(expense => {
+    const expenseDate = new Date(expense.date);
+    const now = new Date();
 
-    if (selectedFilter === 'Week') {
-      const weekStart = new Date(today);
-      weekStart.setDate(today.getDate() - today.getDay());
-      const weekEnd = new Date(weekStart);
-      weekEnd.setDate(weekStart.getDate() + 6);
+    if (filter === 'All') return true;
 
-      filteredList = allExpenses.filter(exp => {
-        const expDate = new Date(exp.date);
-        return expDate >= weekStart && expDate <= weekEnd;
-      });
-      setFilterLabel('This Week');
-    } else if (selectedFilter === 'Month') {
-      filteredList = allExpenses.filter(exp => {
-        const expDate = new Date(exp.date);
-        return expDate.getMonth() === today.getMonth() &&
-               expDate.getFullYear() === today.getFullYear();
-      });
-      setFilterLabel('This Month');
-    } else {
-      setFilterLabel('All');
+    if (filter === 'This Week') {
+      const firstDayOfWeek = new Date(now);
+      firstDayOfWeek.setDate(now.getDate() - now.getDay());
+      const lastDayOfWeek = new Date(firstDayOfWeek);
+      lastDayOfWeek.setDate(firstDayOfWeek.getDate() + 6);
+      return expenseDate >= firstDayOfWeek && expenseDate <= lastDayOfWeek;
     }
 
-    setExpenses(filteredList);
-    calculateTotal(filteredList);
-    calculateTotalsByCategory(filteredList);
-  };
+    if (filter === 'This Month') {
+      return expenseDate.getMonth() === now.getMonth() && expenseDate.getFullYear() === now.getFullYear();
+    }
 
-  const calculateTotal = (filteredList) => {
-    const sum = filteredList.reduce((acc, exp) => acc + exp.amount, 0);
-    setTotal(sum);
-  };
+    return true;
+  });
 
-  const calculateTotalsByCategory = (filteredList) => {
-    const totals = {};
-    filteredList.forEach(exp => {
-      if (totals[exp.category]) {
-        totals[exp.category] += exp.amount;
-      } else {
-        totals[exp.category] = exp.amount;
-      }
-    });
-    setTotalsByCategory(totals);
-  };
+  const totalAmount = filteredExpenses.reduce((acc, e) => acc + Number(e.amount), 0);
+  const totalsByCategory = {};
+  filteredExpenses.forEach(e => {
+    totalsByCategory[e.category] = (totalsByCategory[e.category] || 0) + Number(e.amount);
+  });
 
-  const addExpense = async () => {
+  const saveExpense = async () => {
     const amountNumber = parseFloat(amount);
     if (isNaN(amountNumber) || amountNumber <= 0) return;
 
@@ -86,15 +63,22 @@ export default function ExpenseScreen() {
 
     const today = new Date().toISOString().split('T')[0];
 
-    await db.runAsync(
-      'INSERT INTO expenses (amount, category, note, date) VALUES (?, ?, ?, ?);',
-      [amountNumber, trimmedCategory, trimmedNote || null, today]
-    );
+    if (editingExpense) {
+      await db.runAsync(
+        'UPDATE expenses SET amount = ?, category = ?, note = ?, date = ? WHERE id = ?;',
+        [amountNumber, trimmedCategory, trimmedNote || null, today, editingExpense.id]
+      );
+      setEditingExpense(null);
+    } else {
+      await db.runAsync(
+        'INSERT INTO expenses (amount, category, note, date) VALUES (?, ?, ?, ?);',
+        [amountNumber, trimmedCategory, trimmedNote || null, today]
+      );
+    }
 
     setAmount('');
     setCategory('');
     setNote('');
-
     loadExpenses();
   };
 
@@ -102,6 +86,14 @@ export default function ExpenseScreen() {
     await db.runAsync('DELETE FROM expenses WHERE id = ?;', [id]);
     loadExpenses();
   };
+
+  useEffect(() => {
+    if (editingExpense) {
+      setAmount(editingExpense.amount.toString());
+      setCategory(editingExpense.category);
+      setNote(editingExpense.note || '');
+    }
+  }, [editingExpense]);
 
   const renderExpense = ({ item }) => (
     <View style={styles.expenseRow}>
@@ -111,9 +103,14 @@ export default function ExpenseScreen() {
         {item.note ? <Text style={styles.expenseNote}>{item.note}</Text> : null}
         <Text style={styles.expenseDate}>{item.date}</Text>
       </View>
-      <TouchableOpacity onPress={() => deleteExpense(item.id)}>
-        <Text style={styles.delete}>✕</Text>
-      </TouchableOpacity>
+      <View style={{ flexDirection: 'row' }}>
+        <TouchableOpacity onPress={() => setEditingExpense(item)}>
+          <Text style={styles.edit}>✎</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={() => deleteExpense(item.id)}>
+          <Text style={styles.delete}>✕</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
@@ -137,31 +134,24 @@ export default function ExpenseScreen() {
     <SafeAreaView style={styles.container}>
       <Text style={styles.heading}>Student Expense Tracker</Text>
 
-      {/* Filter Buttons */}
-      <View style={styles.filters}>
-        <Button title="All" onPress={() => { setFilter('All'); loadExpenses(); }} />
-        <Button title="This Week" onPress={() => { setFilter('Week'); loadExpenses(); }} />
-        <Button title="This Month" onPress={() => { setFilter('Month'); loadExpenses(); }} />
+      {/* Filters */}
+      <View style={styles.filterRow}>
+        {['All', 'This Week', 'This Month'].map(f => (
+          <Button key={f} title={f} onPress={() => setFilter(f)} color={filter === f ? '#3b82f6' : '#6b7280'} />
+        ))}
       </View>
 
-      {/* Total Spending */}
-      <Text style={styles.total}>
-        Total Spending ({filterLabel}): ${total.toFixed(2)}
-      </Text>
-
-      {/* Totals by Category */}
+      {/* Totals */}
+      <Text style={styles.total}>Total ({filter}): ${totalAmount.toFixed(2)}</Text>
       {Object.keys(totalsByCategory).length > 0 && (
-        <View style={styles.categoryTotals}>
-          <Text style={styles.categoryTotalsHeading}>By Category ({filterLabel}):</Text>
+        <View style={styles.byCategory}>
           {Object.entries(totalsByCategory).map(([cat, amt]) => (
-            <Text key={cat} style={styles.categoryTotal}>
-              {cat}: ${amt.toFixed(2)}
-            </Text>
+            <Text key={cat} style={styles.categoryTotal}>{cat}: ${amt.toFixed(2)}</Text>
           ))}
         </View>
       )}
 
-      {/* Add Expense Form */}
+      {/* Expense Form */}
       <View style={styles.form}>
         <TextInput
           style={styles.input}
@@ -185,11 +175,11 @@ export default function ExpenseScreen() {
           value={note}
           onChangeText={setNote}
         />
-        <Button title="Add Expense" onPress={addExpense} />
+        <Button title={editingExpense ? "Save Changes" : "Add Expense"} onPress={saveExpense} />
       </View>
 
       <FlatList
-        data={expenses}
+        data={filteredExpenses}
         keyExtractor={(item) => item.id.toString()}
         renderItem={renderExpense}
         ListEmptyComponent={<Text style={styles.empty}>No expenses yet.</Text>}
