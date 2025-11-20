@@ -18,25 +18,42 @@ export default function ExpenseScreen() {
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState('');
   const [note, setNote] = useState('');
+  const [filter, setFilter] = useState('All'); 
 
-  // Load all expenses from the database
   const loadExpenses = async () => {
     const rows = await db.getAllAsync(
       'SELECT * FROM expenses ORDER BY id DESC;'
     );
-    setExpenses(rows);
+
+    const today = new Date();
+    let filtered = rows;
+
+    if (filter === 'This Week') {
+      const firstDayOfWeek = new Date(today.setDate(today.getDate() - today.getDay()));
+      const lastDayOfWeek = new Date(today.setDate(firstDayOfWeek.getDate() + 6));
+      filtered = rows.filter((e) => {
+        const date = new Date(e.date);
+        return date >= firstDayOfWeek && date <= lastDayOfWeek;
+      });
+    } else if (filter === 'This Month') {
+      const month = today.getMonth();
+      const year = today.getFullYear();
+      filtered = rows.filter((e) => {
+        const date = new Date(e.date);
+        return date.getMonth() === month && date.getFullYear() === year;
+      });
+    }
+
+    setExpenses(filtered);
   };
 
-  // Add a new expense, including today's date
   const addExpense = async () => {
     const amountNumber = parseFloat(amount);
     if (isNaN(amountNumber) || amountNumber <= 0) return;
-
     const trimmedCategory = category.trim();
     const trimmedNote = note.trim();
     if (!trimmedCategory) return;
 
-    // Get today's date in YYYY-MM-DD format
     const today = new Date().toISOString().split('T')[0];
 
     await db.runAsync(
@@ -50,13 +67,11 @@ export default function ExpenseScreen() {
     loadExpenses();
   };
 
-  // Delete an expense
   const deleteExpense = async (id) => {
     await db.runAsync('DELETE FROM expenses WHERE id = ?;', [id]);
     loadExpenses();
   };
 
-  // Render each expense row
   const renderExpense = ({ item }) => (
     <View style={styles.expenseRow}>
       <View style={{ flex: 1 }}>
@@ -71,7 +86,6 @@ export default function ExpenseScreen() {
     </View>
   );
 
-  // Set up the database table on first load
   useEffect(() => {
     async function setup() {
       await db.execAsync(`
@@ -83,16 +97,40 @@ export default function ExpenseScreen() {
           date TEXT NOT NULL
         );
       `);
-
-      await loadExpenses();
+      loadExpenses();
     }
-
     setup();
   }, []);
 
   return (
     <SafeAreaView style={styles.container}>
       <Text style={styles.heading}>Student Expense Tracker</Text>
+
+      {/* Filter Buttons */}
+      <View style={styles.filters}>
+        {['All', 'This Week', 'This Month'].map((f) => (
+          <TouchableOpacity
+            key={f}
+            style={[
+              styles.filterButton,
+              filter === f && styles.filterButtonActive,
+            ]}
+            onPress={() => {
+              setFilter(f);
+              loadExpenses();
+            }}
+          >
+            <Text
+              style={[
+                styles.filterText,
+                filter === f && styles.filterTextActive,
+              ]}
+            >
+              {f}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
 
       <View style={styles.form}>
         <TextInput
@@ -133,6 +171,7 @@ export default function ExpenseScreen() {
     </SafeAreaView>
   );
 }
+
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, backgroundColor: '#111827' },
