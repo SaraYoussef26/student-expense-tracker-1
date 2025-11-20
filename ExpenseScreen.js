@@ -19,37 +19,67 @@ export default function ExpenseScreen() {
   const [category, setCategory] = useState('');
   const [note, setNote] = useState('');
   const [filter, setFilter] = useState('All'); 
+  const [filterLabel, setFilterLabel] = useState('All');
+  const [total, setTotal] = useState(0);
+  const [totalsByCategory, setTotalsByCategory] = useState({});
 
   const loadExpenses = async () => {
-    const rows = await db.getAllAsync(
-      'SELECT * FROM expenses ORDER BY id DESC;'
-    );
+    const rows = await db.getAllAsync('SELECT * FROM expenses ORDER BY id DESC;');
+    applyFilter(rows, filter);
+  };
 
+  const applyFilter = (allExpenses, selectedFilter) => {
+    let filteredList = allExpenses;
     const today = new Date();
-    let filtered = rows;
 
-    if (filter === 'This Week') {
-      const firstDayOfWeek = new Date(today.setDate(today.getDate() - today.getDay()));
-      const lastDayOfWeek = new Date(today.setDate(firstDayOfWeek.getDate() + 6));
-      filtered = rows.filter((e) => {
-        const date = new Date(e.date);
-        return date >= firstDayOfWeek && date <= lastDayOfWeek;
+    if (selectedFilter === 'Week') {
+      const weekStart = new Date(today);
+      weekStart.setDate(today.getDate() - today.getDay());
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+
+      filteredList = allExpenses.filter(exp => {
+        const expDate = new Date(exp.date);
+        return expDate >= weekStart && expDate <= weekEnd;
       });
-    } else if (filter === 'This Month') {
-      const month = today.getMonth();
-      const year = today.getFullYear();
-      filtered = rows.filter((e) => {
-        const date = new Date(e.date);
-        return date.getMonth() === month && date.getFullYear() === year;
+      setFilterLabel('This Week');
+    } else if (selectedFilter === 'Month') {
+      filteredList = allExpenses.filter(exp => {
+        const expDate = new Date(exp.date);
+        return expDate.getMonth() === today.getMonth() &&
+               expDate.getFullYear() === today.getFullYear();
       });
+      setFilterLabel('This Month');
+    } else {
+      setFilterLabel('All');
     }
 
-    setExpenses(filtered);
+    setExpenses(filteredList);
+    calculateTotal(filteredList);
+    calculateTotalsByCategory(filteredList);
+  };
+
+  const calculateTotal = (filteredList) => {
+    const sum = filteredList.reduce((acc, exp) => acc + exp.amount, 0);
+    setTotal(sum);
+  };
+
+  const calculateTotalsByCategory = (filteredList) => {
+    const totals = {};
+    filteredList.forEach(exp => {
+      if (totals[exp.category]) {
+        totals[exp.category] += exp.amount;
+      } else {
+        totals[exp.category] = exp.amount;
+      }
+    });
+    setTotalsByCategory(totals);
   };
 
   const addExpense = async () => {
     const amountNumber = parseFloat(amount);
     if (isNaN(amountNumber) || amountNumber <= 0) return;
+
     const trimmedCategory = category.trim();
     const trimmedNote = note.trim();
     if (!trimmedCategory) return;
@@ -64,6 +94,7 @@ export default function ExpenseScreen() {
     setAmount('');
     setCategory('');
     setNote('');
+
     loadExpenses();
   };
 
@@ -97,7 +128,7 @@ export default function ExpenseScreen() {
           date TEXT NOT NULL
         );
       `);
-      loadExpenses();
+      await loadExpenses();
     }
     setup();
   }, []);
@@ -108,30 +139,29 @@ export default function ExpenseScreen() {
 
       {/* Filter Buttons */}
       <View style={styles.filters}>
-        {['All', 'This Week', 'This Month'].map((f) => (
-          <TouchableOpacity
-            key={f}
-            style={[
-              styles.filterButton,
-              filter === f && styles.filterButtonActive,
-            ]}
-            onPress={() => {
-              setFilter(f);
-              loadExpenses();
-            }}
-          >
-            <Text
-              style={[
-                styles.filterText,
-                filter === f && styles.filterTextActive,
-              ]}
-            >
-              {f}
-            </Text>
-          </TouchableOpacity>
-        ))}
+        <Button title="All" onPress={() => { setFilter('All'); loadExpenses(); }} />
+        <Button title="This Week" onPress={() => { setFilter('Week'); loadExpenses(); }} />
+        <Button title="This Month" onPress={() => { setFilter('Month'); loadExpenses(); }} />
       </View>
 
+      {/* Total Spending */}
+      <Text style={styles.total}>
+        Total Spending ({filterLabel}): ${total.toFixed(2)}
+      </Text>
+
+      {/* Totals by Category */}
+      {Object.keys(totalsByCategory).length > 0 && (
+        <View style={styles.categoryTotals}>
+          <Text style={styles.categoryTotalsHeading}>By Category ({filterLabel}):</Text>
+          {Object.entries(totalsByCategory).map(([cat, amt]) => (
+            <Text key={cat} style={styles.categoryTotal}>
+              {cat}: ${amt.toFixed(2)}
+            </Text>
+          ))}
+        </View>
+      )}
+
+      {/* Add Expense Form */}
       <View style={styles.form}>
         <TextInput
           style={styles.input}
@@ -171,7 +201,6 @@ export default function ExpenseScreen() {
     </SafeAreaView>
   );
 }
-
 
 const styles = StyleSheet.create({
   container: { flex: 1, padding: 16, backgroundColor: '#111827' },
