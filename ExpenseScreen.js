@@ -8,6 +8,7 @@ import {
   FlatList,
   TouchableOpacity,
   StyleSheet,
+  Alert,
 } from 'react-native';
 import { useSQLiteContext } from 'expo-sqlite';
 
@@ -34,9 +35,13 @@ export default function ExpenseScreen() {
 
     if (filter === 'This Week') {
       const firstDayOfWeek = new Date(now);
+      firstDayOfWeek.setHours(0, 0, 0, 0);
       firstDayOfWeek.setDate(now.getDate() - now.getDay());
+      
       const lastDayOfWeek = new Date(firstDayOfWeek);
       lastDayOfWeek.setDate(firstDayOfWeek.getDate() + 6);
+      lastDayOfWeek.setHours(23, 59, 59, 999);
+      
       return expenseDate >= firstDayOfWeek && expenseDate <= lastDayOfWeek;
     }
 
@@ -58,28 +63,35 @@ export default function ExpenseScreen() {
     if (isNaN(amountNumber) || amountNumber <= 0) return;
 
     const trimmedCategory = category.trim();
-    const trimmedNote = note.trim();
     if (!trimmedCategory) return;
+    
+    const trimmedNote = note.trim();
+    const finalNote = trimmedNote === '' ? null : trimmedNote;
+    const expenseDate = editingExpense ? editingExpense.date : new Date().toISOString(); 
 
-    const today = new Date().toISOString().split('T')[0];
+    try {
+        if (editingExpense) {
+            await db.runAsync(
+                'UPDATE expenses SET amount = ?, category = ?, note = ?, date = ? WHERE id = ?;',
+                [amountNumber, trimmedCategory, finalNote, expenseDate, editingExpense.id]
+            );
+            setEditingExpense(null);
+        } else {
+            await db.runAsync(
+                'INSERT INTO expenses (amount, category, note, date) VALUES (?, ?, ?, ?);',
+                [amountNumber, trimmedCategory, finalNote, expenseDate]
+            );
+        }
+        
+        setAmount('');
+        setCategory('');
+        setNote('');
+        loadExpenses();
 
-    if (editingExpense) {
-      await db.runAsync(
-        'UPDATE expenses SET amount = ?, category = ?, note = ?, date = ? WHERE id = ?;',
-        [amountNumber, trimmedCategory, trimmedNote || null, today, editingExpense.id]
-      );
-      setEditingExpense(null);
-    } else {
-      await db.runAsync(
-        'INSERT INTO expenses (amount, category, note, date) VALUES (?, ?, ?, ?);',
-        [amountNumber, trimmedCategory, trimmedNote || null, today]
-      );
+    } catch (error) {
+        console.error("Database operation failed:", error);
+        Alert.alert("Error", `Failed to save expense: ${error.message}`);
     }
-
-    setAmount('');
-    setCategory('');
-    setNote('');
-    loadExpenses();
   };
 
   const deleteExpense = async (id) => {
@@ -101,7 +113,7 @@ export default function ExpenseScreen() {
         <Text style={styles.expenseAmount}>${Number(item.amount).toFixed(2)}</Text>
         <Text style={styles.expenseCategory}>{item.category}</Text>
         {item.note ? <Text style={styles.expenseNote}>{item.note}</Text> : null}
-        <Text style={styles.expenseDate}>{item.date}</Text>
+        <Text style={styles.expenseDate}>{new Date(item.date).toLocaleDateString()}</Text>
       </View>
       <View style={{ flexDirection: 'row' }}>
         <TouchableOpacity onPress={() => setEditingExpense(item)}>
@@ -116,6 +128,9 @@ export default function ExpenseScreen() {
 
   useEffect(() => {
     async function setup() {
+      // FIX: Dropping the old table to ensure the new schema with the 'date' column is created.
+      await db.execAsync(`DROP TABLE IF EXISTS expenses;`);
+
       await db.execAsync(`
         CREATE TABLE IF NOT EXISTS expenses (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,14 +149,12 @@ export default function ExpenseScreen() {
     <SafeAreaView style={styles.container}>
       <Text style={styles.heading}>Student Expense Tracker</Text>
 
-      {/* Filters */}
       <View style={styles.filterRow}>
         {['All', 'This Week', 'This Month'].map(f => (
           <Button key={f} title={f} onPress={() => setFilter(f)} color={filter === f ? '#3b82f6' : '#6b7280'} />
         ))}
       </View>
 
-      {/* Totals */}
       <Text style={styles.total}>Total ({filter}): ${totalAmount.toFixed(2)}</Text>
       {Object.keys(totalsByCategory).length > 0 && (
         <View style={styles.byCategory}>
@@ -151,7 +164,6 @@ export default function ExpenseScreen() {
         </View>
       )}
 
-      {/* Expense Form */}
       <View style={styles.form}>
         <TextInput
           style={styles.input}
@@ -200,6 +212,25 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginBottom: 16,
   },
+  filterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginBottom: 16,
+  },
+  total: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#fff',
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  byCategory: {
+    marginBottom: 16,
+  },
+  categoryTotal: {
+    color: '#9ca3af',
+    fontSize: 14,
+  },
   form: {
     marginBottom: 16,
     gap: 8,
@@ -233,10 +264,19 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#9ca3af',
   },
+  expenseDate: {
+    fontSize: 10,
+    color: '#6b7280',
+    marginTop: 4,
+  },
+  edit: {
+    color: '#3b82f6',
+    fontSize: 20,
+    marginRight: 12,
+  },
   delete: {
     color: '#f87171',
     fontSize: 20,
-    marginLeft: 12,
   },
   empty: {
     color: '#9ca3af',
