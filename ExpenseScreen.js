@@ -66,7 +66,7 @@ export default function ExpenseScreen() {
     if (editingExpense) {
       await db.runAsync(
         'UPDATE expenses SET amount = ?, category = ?, note = ?, date = ? WHERE id = ?;',
-        [amountNumber, trimmedCategory, trimmedNote || null, editingExpense.date, editingExpense.id]
+        [amountNumber, trimmedCategory, trimmedNote || null, today, editingExpense.id]
       );
       setEditingExpense(null);
     } else {
