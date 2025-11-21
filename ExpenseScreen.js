@@ -128,7 +128,6 @@ export default function ExpenseScreen() {
 
   useEffect(() => {
     async function setup() {
-      // FIX: Dropping the old table to ensure the new schema with the 'date' column is created.
       await db.execAsync(`DROP TABLE IF EXISTS expenses;`);
 
       await db.execAsync(`
